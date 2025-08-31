@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import FileUploader from "./components/FileUploader";
 import SuggestionCard from "./components/SuggestionCard";
 import { extractTextFromImage } from "./services/ocr";
 import { extractTextFromPDF } from "./services/pdfExtractor";
 import { analyzeText as heuristicAnalyze } from "./utils/suggestions";
 import { analyzeWithLocalModels, preloadPipelines } from "./services/modelService";
-
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -15,97 +14,74 @@ export default function App() {
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState(null);
 
-  preloadPipelines().catch(() => { });
+  preloadPipelines().catch(() => {});
 
-  // 🔹 Reset states when file changes
+  // 🔹 Reset states and auto-extract text + suggestions when file changes
   useEffect(() => {
-    if (file) {
-      setExtractedText("");
-      setSuggestions(null);
-      setProgress(null);
-      setError("");
-    }
-  }, [file]);
-
-  // 🔹 Extract Text
-  const handleExtractText = useCallback(async () => {
     if (!file) return;
-    setError("");
-    setSuggestions(null); // clear old suggestions only
-    setProgress(null);
 
-    try {
-      setLoading(true);
-      let text = "";
-
-      if (file.type === "application/pdf" || file.name.match(/\.pdf$/i)) {
-        text = await extractTextFromPDF(file, (p) => setProgress(p));
-      } else if (
-        file.type.startsWith("image/") ||
-        file.name.match(/\.(jpe?g|png|bmp|tiff|webp)$/i)
-      ) {
-        text = await extractTextFromImage(file, (progressObj) => {
-          setProgress(
-            progressObj.progress
-              ? Math.round(progressObj.progress * 100)
-              : progressObj
-          );
-        });
-      } else {
-        throw new Error("Unsupported file type. Upload PDF or image.");
-      }
-
-      if (!text || text.trim() === "") {
-        throw new Error("No text could be extracted.");
-      }
-
-      setExtractedText(text); // ✅ set after extraction
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to extract text.");
-      setExtractedText(""); // clear only if error
-    } finally {
-      setLoading(false);
-    }
-  }, [file]);
-
-  // 🔹 Get Suggestions
-  const handleGetSuggestions = useCallback(async () => {
-    if (!extractedText) {
-      setError("No text extracted. Please extract text first.");
-      return;
-    }
-
-    setError("");
+    setExtractedText("");
     setSuggestions(null);
+    setProgress(null);
+    setError("");
 
-    try {
-      setLoading(true);
-      const heuristic = heuristicAnalyze(extractedText, file);
-
-      let modelResults = null;
+    const processFile = async () => {
       try {
-        modelResults = await analyzeWithLocalModels(extractedText);
-      } catch (e) {
-        console.warn("ML model failed, using heuristic only.", e);
-      }
+        setLoading(true);
+        let text = "";
 
-      setSuggestions({
-        ...heuristic,
-        model: modelResults,
-        altText: modelResults?.summary || heuristic.altText,
-      });
-    } catch (err) {
-      console.error(err);
-      setError("Failed to analyze text.");
-    } finally {
-      setLoading(false);
-    }
-  }, [extractedText, file]);
+        if (file.type === "application/pdf" || file.name.match(/\.pdf$/i)) {
+          text = await extractTextFromPDF(file, (p) => setProgress(p));
+        } else if (
+          file.type.startsWith("image/") ||
+          file.name.match(/\.(jpe?g|png|bmp|tiff|webp)$/i)
+        ) {
+          text = await extractTextFromImage(file, (progressObj) => {
+            setProgress(
+              progressObj.progress
+                ? Math.round(progressObj.progress * 100)
+                : progressObj
+            );
+          });
+        } else {
+          throw new Error("Unsupported file type. Upload PDF or image.");
+        }
+
+        if (!text || text.trim() === "") {
+          throw new Error("No text could be extracted.");
+        }
+
+        setExtractedText(text);
+
+        // 🔹 Automatically generate suggestions
+        const heuristic = heuristicAnalyze(text, file);
+        let modelResults = null;
+        try {
+          modelResults = await analyzeWithLocalModels(text);
+        } catch (e) {
+          console.warn("ML model failed, using heuristic only.", e);
+        }
+
+        setSuggestions({
+          ...heuristic,
+          model: modelResults,
+          altText: modelResults?.summary || heuristic.altText,
+        });
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "Failed to process file.");
+        setExtractedText("");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    processFile();
+  }, [file]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex flex-col">
-      {/* Header (Fixed) */}
+      {/* Header */}
       <header className="fixed top-0 left-0 right-0 bg-purple-900 text-white py-6 shadow-md z-50">
         <div className="container mx-auto px-4 text-center">
           <h1 className="text-3xl md:text-4xl font-bold">
@@ -120,30 +96,8 @@ export default function App() {
       {/* Main */}
       <main className="flex-1 container mx-auto px-4 py-6 mt-32">
         <div className="bg-gray-100 rounded-2xl shadow-lg p-6 md:p-10">
+          {/* File Uploader */}
           <FileUploader onFileSelected={setFile} disabled={loading} />
-
-          {/* Action Buttons */}
-          {file && (
-            <div className="mt-6 flex flex-col sm:flex-row gap-4 justify-center">
-              <button
-                onClick={handleExtractText}
-                disabled={loading}
-                className="px-6 py-2 bg-gray-500 text-white rounded-lg shadow hover:bg-gray-700 transition"
-              >
-                {loading ? "Extracting..." : "Extract Text"}
-              </button>
-
-              {extractedText && (
-                <button
-                  onClick={handleGetSuggestions}
-                  disabled={loading}
-                  className="px-6 py-2 bg-gray-500 text-white rounded-lg shadow hover:bg-gray-700 transition"
-                >
-                  {loading ? "Analyzing..." : "Suggestions"}
-                </button>
-              )}
-            </div>
-          )}
 
           {/* Loading */}
           {loading && (
@@ -173,6 +127,7 @@ export default function App() {
           {/* Results */}
           {file && extractedText && (
             <section className="mt-8">
+              {/* Result Header */}
               <h2 className="text-2xl font-extrabold mb-6 text-center 
                 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 
                 text-transparent bg-clip-text tracking-wide drop-shadow-md">
@@ -188,7 +143,6 @@ export default function App() {
                       src={URL.createObjectURL(file)}
                       className="max-h-60 rounded-lg border-4 border-gray-900 object-cover"
                     />
-                    {/* Optional overlay icon */}
                     <div className="absolute top-2 right-2 text-white text-lg opacity-80">
                       🖼️
                     </div>
@@ -198,18 +152,15 @@ export default function App() {
 
               {/* Extracted Text */}
               <div className="w-full mx-auto p-8 bg-gray-900 text-gray-200 rounded-2xl shadow-lg mt-6">
-                {/* Header */}
                 <h3 className="text-2xl font-bold text-center mb-8 bg-gradient-to-r from-purple-400 via-pink-400 to-purple-500 text-transparent bg-clip-text">
                   Extracted Text
                 </h3>
-
 
                 <div className="bg-gray-900 border-gray-900 shadow-md rounded-2xl p-4 max-h-80 overflow-y-auto scrollbar-hide">
                   <p className="whitespace-pre-line text-gray-300 leading-relaxed text-sm font-mono text-justify">
                     {extractedText}
                   </p>
                 </div>
-
 
                 <div className="text-xs text-gray-500 mt-2 text-right">
                   {extractedText.length} characters extracted
@@ -218,7 +169,7 @@ export default function App() {
 
               {/* Suggestions */}
               {suggestions && (
-                <div className="mt-10">   {/* 🔹 Added margin for spacing */}
+                <div className="mt-10">
                   <SuggestionCard suggestions={suggestions} />
                 </div>
               )}
