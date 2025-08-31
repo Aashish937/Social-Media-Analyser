@@ -4,7 +4,6 @@ import SuggestionCard from "./components/SuggestionCard";
 import { extractTextFromImage } from "./services/ocr";
 import { extractTextFromPDF } from "./services/pdfExtractor";
 import { analyzeText as heuristicAnalyze } from "./utils/suggestions";
-import { analyzeWithLocalModels, preloadPipelines } from "./services/modelService";
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -14,69 +13,47 @@ export default function App() {
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState(null);
 
-  preloadPipelines().catch(() => {});
-
-  // 🔹 Reset states and auto-extract text + suggestions when file changes
+  // 🔹 Automatically extract text when file changes
   useEffect(() => {
     if (!file) return;
 
-    setExtractedText("");
-    setSuggestions(null);
-    setProgress(null);
-    setError("");
+    const extract = async () => {
+      setLoading(true);
+      setError("");
+      setProgress(0);
+      setExtractedText("");
+      setSuggestions(null);
 
-    const processFile = async () => {
       try {
-        setLoading(true);
         let text = "";
-
         if (file.type === "application/pdf" || file.name.match(/\.pdf$/i)) {
           text = await extractTextFromPDF(file, (p) => setProgress(p));
         } else if (
           file.type.startsWith("image/") ||
           file.name.match(/\.(jpe?g|png|bmp|tiff|webp)$/i)
         ) {
-          text = await extractTextFromImage(file, (progressObj) => {
-            setProgress(
-              progressObj.progress
-                ? Math.round(progressObj.progress * 100)
-                : progressObj
-            );
-          });
+          text = await extractTextFromImage(file, (progressObj) =>
+            setProgress(progressObj.progress ? Math.round(progressObj.progress * 100) : progressObj)
+          );
         } else {
           throw new Error("Unsupported file type. Upload PDF or image.");
         }
 
-        if (!text || text.trim() === "") {
-          throw new Error("No text could be extracted.");
-        }
-
+        if (!text.trim()) throw new Error("No text could be extracted.");
         setExtractedText(text);
 
-        // 🔹 Automatically generate suggestions
+        // 🔹 Automatically analyze heuristically
         const heuristic = heuristicAnalyze(text, file);
-        let modelResults = null;
-        try {
-          modelResults = await analyzeWithLocalModels(text);
-        } catch (e) {
-          console.warn("ML model failed, using heuristic only.", e);
-        }
-
-        setSuggestions({
-          ...heuristic,
-          model: modelResults,
-          altText: modelResults?.summary || heuristic.altText,
-        });
+        setSuggestions(heuristic);
       } catch (err) {
         console.error(err);
-        setError(err.message || "Failed to process file.");
-        setExtractedText("");
+        setError(err.message || "Failed to extract text.");
       } finally {
         setLoading(false);
       }
     };
 
-    processFile();
+    extract();
   }, [file]);
 
   return (
@@ -84,11 +61,9 @@ export default function App() {
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 bg-purple-900 text-white py-6 shadow-md z-50">
         <div className="container mx-auto px-4 text-center">
-          <h1 className="text-3xl md:text-4xl font-bold">
-            Social Media Content Analyzer
-          </h1>
+          <h1 className="text-3xl md:text-4xl font-bold">Social Media Content Analyzer</h1>
           <p className="mt-2 text-sm md:text-base opacity-90">
-            Upload a single PDF or image → Extract Text → Get Suggestions 🚀
+            Upload a PDF or image → Automatic Text Extraction & Suggestions 🚀
           </p>
         </div>
       </header>
@@ -96,7 +71,6 @@ export default function App() {
       {/* Main */}
       <main className="flex-1 container mx-auto px-4 py-6 mt-32">
         <div className="bg-gray-100 rounded-2xl shadow-lg p-6 md:p-10">
-          {/* File Uploader */}
           <FileUploader onFileSelected={setFile} disabled={loading} />
 
           {/* Loading */}
@@ -110,9 +84,7 @@ export default function App() {
                 ></div>
               </div>
               <p className="text-sm mt-2 text-gray-600">
-                {typeof progress === "number"
-                  ? `${progress}% completed`
-                  : "Working..."}
+                {typeof progress === "number" ? `${progress}% completed` : "Working..."}
               </p>
             </div>
           )}
@@ -127,7 +99,6 @@ export default function App() {
           {/* Results */}
           {file && extractedText && (
             <section className="mt-8">
-              {/* Result Header */}
               <h2 className="text-2xl font-extrabold mb-6 text-center 
                 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 
                 text-transparent bg-clip-text tracking-wide drop-shadow-md">
@@ -137,15 +108,13 @@ export default function App() {
               {/* Image Preview */}
               {file.type.startsWith("image/") && (
                 <div className="flex justify-center mb-6">
-                  <div className="relative rounded-xl p-1 bg-gradient-to-r from-purple-500 via-pink-500 to-indigo-500 hover:scale-105 transition-transform duration-300 shadow-lg">
+                  <div className="relative rounded-xl p-1 bg-gradient-to-r from-purple-500 via-pink-500 to-indigo-500 shadow-lg">
                     <img
                       alt={file.name}
                       src={URL.createObjectURL(file)}
                       className="max-h-60 rounded-lg border-4 border-gray-900 object-cover"
                     />
-                    <div className="absolute top-2 right-2 text-white text-lg opacity-80">
-                      🖼️
-                    </div>
+                    <div className="absolute top-2 right-2 text-white text-lg opacity-80">🖼️</div>
                   </div>
                 </div>
               )}
