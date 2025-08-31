@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import FileUploader from "./components/FileUploader";
 import SuggestionCard from "./components/SuggestionCard";
 import { extractTextFromImage } from "./services/ocr";
@@ -13,48 +13,62 @@ export default function App() {
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState(null);
 
-  // 🔹 Automatically extract text when file changes
-  useEffect(() => {
+  // Clear previous content when a new file is uploaded
+  const handleFileChange = (selectedFile) => {
+    setFile(selectedFile);
+    setExtractedText("");
+    setSuggestions(null);
+    setProgress(null);
+    setError("");
+  };
+
+  // Extract Text
+  const handleExtractText = useCallback(async () => {
     if (!file) return;
 
-    const extract = async () => {
-      setLoading(true);
-      setError("");
-      setProgress(0);
-      setExtractedText("");
-      setSuggestions(null);
+    setLoading(true);
+    setError("");
+    setExtractedText("");
+    setSuggestions(null);
+    setProgress(0);
 
-      try {
-        let text = "";
-        if (file.type === "application/pdf" || file.name.match(/\.pdf$/i)) {
-          text = await extractTextFromPDF(file, (p) => setProgress(p));
-        } else if (
-          file.type.startsWith("image/") ||
-          file.name.match(/\.(jpe?g|png|bmp|tiff|webp)$/i)
-        ) {
-          text = await extractTextFromImage(file, (progressObj) =>
-            setProgress(progressObj.progress ? Math.round(progressObj.progress * 100) : progressObj)
-          );
-        } else {
-          throw new Error("Unsupported file type. Upload PDF or image.");
-        }
-
-        if (!text.trim()) throw new Error("No text could be extracted.");
-        setExtractedText(text);
-
-        // 🔹 Automatically analyze heuristically
-        const heuristic = heuristicAnalyze(text, file);
-        setSuggestions(heuristic);
-      } catch (err) {
-        console.error(err);
-        setError(err.message || "Failed to extract text.");
-      } finally {
-        setLoading(false);
+    try {
+      let text = "";
+      if (file.type === "application/pdf" || file.name.match(/\.pdf$/i)) {
+        text = await extractTextFromPDF(file, (p) => setProgress(p));
+      } else if (
+        file.type.startsWith("image/") ||
+        file.name.match(/\.(jpe?g|png|bmp|tiff|webp)$/i)
+      ) {
+        text = await extractTextFromImage(file, (progressObj) =>
+          setProgress(progressObj.progress ? Math.round(progressObj.progress * 100) : progressObj)
+        );
+      } else {
+        throw new Error("Unsupported file type. Upload PDF or image.");
       }
-    };
 
-    extract();
+      if (!text.trim()) throw new Error("No text could be extracted.");
+      setExtractedText(text);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to extract text.");
+    } finally {
+      setLoading(false);
+    }
   }, [file]);
+
+  // Fast Heuristic Suggestions
+  const handleGetSuggestions = useCallback(() => {
+    if (!extractedText) {
+      setError("No text extracted. Please extract text first.");
+      return;
+    }
+
+    setError("");
+    setSuggestions(null); // clear previous suggestions
+    const heuristic = heuristicAnalyze(extractedText, file);
+    setSuggestions(heuristic); // ✅ Instant
+  }, [extractedText, file]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex flex-col">
@@ -63,7 +77,7 @@ export default function App() {
         <div className="container mx-auto px-4 text-center">
           <h1 className="text-3xl md:text-4xl font-bold">Social Media Content Analyzer</h1>
           <p className="mt-2 text-sm md:text-base opacity-90">
-            Upload a PDF or image → Automatic Text Extraction & Suggestions 🚀
+            Upload a PDF or image → Extract Text → Get Suggestions 🚀
           </p>
         </div>
       </header>
@@ -71,7 +85,30 @@ export default function App() {
       {/* Main */}
       <main className="flex-1 container mx-auto px-4 py-6 mt-32">
         <div className="bg-gray-100 rounded-2xl shadow-lg p-6 md:p-10">
-          <FileUploader onFileSelected={setFile} disabled={loading} />
+          <FileUploader onFileSelected={handleFileChange} disabled={loading} />
+
+          {/* Action Buttons */}
+          {file && (
+            <div className="mt-6 flex flex-col sm:flex-row gap-4 justify-center">
+              <button
+                onClick={handleExtractText}
+                disabled={loading}
+                className="px-6 py-2 bg-gray-500 text-white rounded-lg shadow hover:bg-gray-700 transition"
+              >
+                {loading ? "Extracting..." : "Extract Text"}
+              </button>
+
+              {extractedText && (
+                <button
+                  onClick={handleGetSuggestions}
+                  disabled={loading}
+                  className="px-6 py-2 bg-gray-500 text-white rounded-lg shadow hover:bg-gray-700 transition"
+                >
+                  Suggestions
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Loading */}
           {loading && (
